@@ -1,0 +1,11 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+override.tf
+override.tf.json
+.terraform.lock.hcl
+
+# kubeconfig gerado pelo provider kind a cada apply (contem credenciais do cluster)
+oficina-config

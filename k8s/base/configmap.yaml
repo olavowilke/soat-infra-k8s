@@ -1,0 +1,26 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-config
+  namespace: oficina
+  labels:
+    app.kubernetes.io/part-of: oficina
+data:
+  # Configuração não sensível da aplicação. `SPRING_PROFILES_ACTIVE` não é
+  # definido aqui de propósito: cada overlay de ambiente adiciona a sua chave
+  # (homolog | prod) via patch, evitando duas cópias deste ConfigMap.
+  SERVER_PORT: "8080"
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"
+  # Nome que o agente Java do New Relic (Tarefa 6) reporta como appName.
+  # As condições de alerta e o painel de latência em observability/alertas.md
+  # e observability/dashboard-oficina.json filtram por
+  # `WHERE appName = 'oficina-api'` — esse valor precisa bater exatamente.
+  NEW_RELIC_APP_NAME: "oficina-api"
+  # Notificação por e-mail (Etapa 8 da Fase 2) — na AWS aponta para um provedor
+  # SMTP real (ex.: Amazon SES), não mais para o Mailhog do cluster kind local.
+  NOTIFICACAO_EMAIL_ENABLED: "true"
+  NOTIFICACAO_EMAIL_REMETENTE: "nao-responder@oficina.com"
+  MAIL_HOST: "email-smtp.us-east-1.amazonaws.com"
+  MAIL_PORT: "587"
+  MAIL_SMTP_AUTH: "true"
+  MAIL_SMTP_STARTTLS: "true"

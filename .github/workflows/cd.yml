@@ -1,0 +1,236 @@
+name: CD - Deploy EKS + Kubernetes
+
+# Deploy automatico das branches de homologacao e producao (requisito da Fase 3).
+#   homolog -> ambiente homolog
+#   main    -> ambiente prod
+# Ordem entre stacks: infra-k8s -> infra-database -> lambda-auth -> aplicacao.
+# Esta pipeline cria/atualiza o cluster EKS e os manifestos base (Namespace,
+# ConfigMap, Deployment, Service, HPA, PDB); o rollout de uma nova imagem da
+# aplicacao (oficina-api) e feito pela pipeline da propria aplicacao, que so
+# troca a tag da imagem no Deployment ja existente (kubectl set image - sem
+# kustomize, sem overlay).
+#
+# `kubectl apply -k` reaplica TODOS os manifestos base, inclusive o campo de
+# imagem do Deployment - se esse campo viesse de uma tag fixa no repositorio
+# (ex.: "latest", que a pipeline de oficina-api nunca publica), cada apply
+# desta stack desfaria o deploy mais recente da aplicacao, resetando a
+# imagem para uma tag inexistente. Por isso este workflow SEMPRE le a
+# imagem hoje em execucao no cluster e a reinjeta antes do apply (ver passo
+# "Determinar a imagem a aplicar" abaixo) - o apply se torna um no-op para
+# a imagem, a nao ser que o operador peca outra via workflow_dispatch.
+on:
+  push:
+    branches: [main, homolog]
+  workflow_dispatch:
+    inputs:
+      ambiente:
+        description: Ambiente alvo
+        required: true
+        default: homolog
+        type: choice
+        options: [homolog, prod]
+      image_tag:
+        description: >-
+          Tag manual da imagem oficina-api a aplicar (ECR). Deixe vazio
+          (padrao) para preservar a imagem que ja esta rodando no cluster -
+          nunca usa "latest" como default, porque essa tag nao existe no
+          ECR (a pipeline de oficina-api so publica "sha-<sha>" e "<ambiente>").
+        required: false
+        default: ''
+
+permissions:
+  id-token: write # OIDC para assumir a role na AWS, sem chave estatica
+  contents: read
+
+jobs:
+  deploy:
+    name: terraform apply + kubectl apply -k
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.ambiente || (github.ref_name == 'main' && 'prod' || 'homolog') }}
+    env:
+      AMBIENTE: ${{ github.event.inputs.ambiente || (github.ref_name == 'main' && 'prod' || 'homolog') }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      IMAGE_TAG_MANUAL: ${{ github.event.inputs.image_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Credenciais AWS (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - name: terraform init
+        working-directory: terraform
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=infra-k8s/${AMBIENTE}/terraform.tfstate" \
+            -backend-config="region=${AWS_REGION}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -backend-config="encrypt=true"
+
+      # New Relic e o monitor sintetico de uptime sao opcionais (variaveis
+      # com default vazio no Terraform, guardadas por `count`): se as
+      # variaveis/secrets do GitHub Actions abaixo nao existirem no
+      # repositorio, `${{ ... }}` resolve para string vazia e o stack
+      # continua subindo normalmente, so sem esses recursos. TF_VAR_* em
+      # vez de `-var=...` para os valores sensiveis nao aparecerem no
+      # comando renderizado no log do Actions.
+      - name: terraform plan
+        working-directory: terraform
+        env:
+          TF_VAR_newrelic_license_key: ${{ secrets.NEW_RELIC_LICENSE_KEY }}
+          TF_VAR_newrelic_account_id: ${{ vars.NEW_RELIC_ACCOUNT_ID }}
+          TF_VAR_newrelic_api_key: ${{ secrets.NEW_RELIC_API_KEY }}
+          TF_VAR_uptime_check_url: ${{ vars.UPTIME_CHECK_URL }}
+        run: |
+          terraform plan -input=false \
+            -var-file=environments/${AMBIENTE}.tfvars \
+            -out=tfplan
+
+      - name: terraform apply
+        working-directory: terraform
+        run: terraform apply -input=false -auto-approve tfplan
+
+      - name: aws eks update-kubeconfig
+        working-directory: terraform
+        run: |
+          CLUSTER_NAME="$(terraform output -raw cluster_name)"
+          aws eks update-kubeconfig --name "$CLUSTER_NAME" --region "$AWS_REGION"
+
+      # O Secret nunca e versionado: e montado aqui, em memoria da pipeline,
+      # a partir do SSM Parameter Store (dados nao sensiveis: host/porta/nome
+      # do banco e o ARN dos segredos) e do Secrets Manager (dados sensiveis:
+      # credenciais do banco e o segredo JWT compartilhado com a Lambda de
+      # autenticacao). Demais valores sensiveis (New Relic, webhook, SMTP) vem
+      # direto de Secrets do GitHub Actions, por nao serem publicados por
+      # nenhuma stack Terraform deste projeto.
+      #
+      # Ordem de apply entre stacks (docs/arquitetura/cicd.md):
+      #   infra-k8s -> infra-database -> lambda-auth -> aplicacao (oficina-api)
+      # Os parametros /database/* e /auth/jwt-secret-arn lidos abaixo so sao
+      # publicados por infra-database e lambda-auth, que rodam DEPOIS desta
+      # stack. Na 1a execucao de cd.yml num ambiente novo eles ainda nao
+      # existem - sem a tolerancia abaixo, "set -euo pipefail" mataria o job
+      # aqui com ParameterNotFound e este workflow nunca teria uma 1a
+      # execucao bem-sucedida (ver infra-k8s/README.md, secao "Apply em duas
+      # fases"). Por isso lemos cada parametro sem abortar no primeiro erro; e
+      # so seguimos criando/atualizando o Secret se TODOS vierem preenchidos.
+      # Se faltar algum, pulamos o passo (exit 0) com um log explicito -
+      # kubectl apply -k ainda cria o Namespace/ConfigMap/Deployment/etc. logo
+      # em seguida; so os pods ficam sem credenciais ate esta pipeline rodar
+      # de novo, depois que infra-database e lambda-auth tiverem aplicado.
+      - name: Criar/atualizar Secret oficina-secrets
+        run: |
+          set -uo pipefail
+          SSM_BASE="/oficina/${AMBIENTE}"
+
+          ler_param() {
+            aws ssm get-parameter --name "$1" --query 'Parameter.Value' --output text 2>/tmp/ssm-param.err
+          }
+
+          FALTANDO=0
+          DB_HOST="$(ler_param "${SSM_BASE}/database/host")" || FALTANDO=1
+          DB_PORT="$(ler_param "${SSM_BASE}/database/port")" || FALTANDO=1
+          DB_NAME="$(ler_param "${SSM_BASE}/database/name")" || FALTANDO=1
+          DB_SECRET_ARN="$(ler_param "${SSM_BASE}/database/secret-arn")" || FALTANDO=1
+          JWT_SECRET_ARN="$(ler_param "${SSM_BASE}/auth/jwt-secret-arn")" || FALTANDO=1
+
+          if [ "${FALTANDO}" -eq 1 ]; then
+            echo "AVISO: um ou mais parametros SSM de ${SSM_BASE}/{database,auth} ainda nao existem."
+            echo "AVISO: isso e esperado na 1a execucao desta pipeline num ambiente novo, ANTES de"
+            echo "AVISO: infra-database e lambda-auth terem rodado (ordem de apply documentada em"
+            echo "AVISO: docs/arquitetura/cicd.md: infra-k8s -> infra-database -> lambda-auth -> aplicacao)."
+            echo "AVISO: pulando a criacao/atualizacao do Secret oficina-secrets nesta execucao - repita"
+            echo "AVISO: esta pipeline (push ou workflow_dispatch) depois que infra-database e lambda-auth"
+            echo "AVISO: tiverem aplicado com sucesso neste ambiente."
+            exit 0
+          fi
+
+          set -e
+          DB_CREDS="$(aws secretsmanager get-secret-value --secret-id "$DB_SECRET_ARN" --query 'SecretString' --output text)"
+          DB_USERNAME="$(echo "$DB_CREDS" | jq -r '.username')"
+          DB_PASSWORD="$(echo "$DB_CREDS" | jq -r '.password')"
+          JWT_SECRET="$(aws secretsmanager get-secret-value --secret-id "$JWT_SECRET_ARN" --query 'SecretString' --output text)"
+
+          DB_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}"
+
+          kubectl create namespace oficina --dry-run=client -o yaml | kubectl apply -f -
+          kubectl create secret generic oficina-secrets \
+            --namespace oficina \
+            --from-literal=DB_URL="${DB_URL}" \
+            --from-literal=DB_USERNAME="${DB_USERNAME}" \
+            --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
+            --from-literal=JWT_SECRET="${JWT_SECRET}" \
+            --from-literal=WEBHOOK_ORCAMENTO_TOKEN="${{ secrets.WEBHOOK_ORCAMENTO_TOKEN }}" \
+            --from-literal=MAIL_USERNAME="${{ secrets.MAIL_USERNAME }}" \
+            --from-literal=MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
+            --from-literal=NEW_RELIC_LICENSE_KEY="${{ secrets.NEW_RELIC_LICENSE_KEY }}" \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      # O repositorio ECR e provisionado por infra-k8s/terraform/ecr.tf
+      # (aws_ecr_repository.oficina_api) - lemos a URL publicada em SSM
+      # (mesmo parametro que a pipeline da aplicacao le, .github/workflows/cd.yml
+      # na raiz) em vez de uma variavel do GitHub, para nao ter uma segunda
+      # fonte da verdade que pode divergir do que o Terraform realmente criou.
+      - name: Ler URL do repositorio ECR (SSM)
+        id: ecr
+        run: |
+          REPO_URL="$(aws ssm get-parameter --name "/oficina/${AMBIENTE}/registry/repository-url" --query 'Parameter.Value' --output text)"
+          echo "repository_url=$REPO_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Set up kustomize
+        run: |
+          curl -sLo kustomize.tar.gz https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.5.0/kustomize_v5.5.0_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz
+          sudo mv kustomize /usr/local/bin/kustomize
+
+      # kustomization.yaml (infra-k8s/k8s/base) nao fixa nenhuma tag de
+      # imagem de proposito - quem decide a imagem e este passo, sempre.
+      # Prioridade: (1) tag manual via workflow_dispatch, se informada;
+      # (2) a imagem que ja esta rodando no Deployment (torna o apply um
+      # no-op para a imagem - o motivo desta correcao); (3) so no bootstrap
+      # (Deployment ainda nao existe neste ambiente) cai para <ECR>:<ambiente>,
+      # com aviso explicito no log. Qualquer falha do `kubectl get` que NAO
+      # seja um "nao encontrado" genuino (kubeconfig quebrado, sem permissao,
+      # cluster fora do ar) aborta o job em vez de arriscar um fallback
+      # silencioso por cima de uma imagem em producao - essa distincao e a
+      # correcao central: um fallback silencioso sobre um erro real e
+      # exatamente a classe de bug que resetava a imagem para "latest".
+      - name: Determinar a imagem a aplicar (preserva a que ja esta rodando)
+        id: imagem
+        run: |
+          if [ -n "${IMAGE_TAG_MANUAL}" ]; then
+            IMAGEM="${{ steps.ecr.outputs.repository_url }}:${IMAGE_TAG_MANUAL}"
+            echo "Tag definida manualmente via workflow_dispatch: ${IMAGEM}"
+          elif IMAGEM_ATUAL="$(kubectl get deployment oficina-api -n oficina \
+                 -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/tmp/kubectl-get.err)"; then
+            IMAGEM="${IMAGEM_ATUAL}"
+            echo "Deployment ja existe - preservando a imagem em execucao: ${IMAGEM}"
+          elif grep -qi "notfound" /tmp/kubectl-get.err; then
+            IMAGEM="${{ steps.ecr.outputs.repository_url }}:${AMBIENTE}"
+            echo "AVISO (bootstrap): Deployment oficina-api ainda nao existe no namespace oficina."
+            echo "AVISO (bootstrap): usando fallback ${IMAGEM} - se a pipeline de oficina-api"
+            echo "AVISO (bootstrap): nunca publicou essa tag no ECR, o pod ficara em"
+            echo "AVISO (bootstrap): ImagePullBackOff ate o primeiro deploy real da aplicacao."
+          else
+            echo "ERRO: kubectl get deployment falhou de um jeito que NAO e 'nao encontrado':" >&2
+            cat /tmp/kubectl-get.err >&2
+            echo "Abortando em vez de arriscar sobrescrever a imagem em execucao com um fallback errado." >&2
+            exit 1
+          fi
+          echo "imagem=${IMAGEM}" >> "$GITHUB_OUTPUT"
+
+      - name: kubectl apply -k (manifestos base da aplicacao)
+        working-directory: k8s/overlays/${{ env.AMBIENTE }}
+        run: |
+          kustomize edit set image "oficina-api=${{ steps.imagem.outputs.imagem }}"
+          kustomize build . | kubectl apply -f -
+
+      - name: kubectl rollout status
+        run: kubectl -n oficina rollout status deploy/oficina-api --timeout=180s

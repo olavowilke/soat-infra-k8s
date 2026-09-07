@@ -1,0 +1,22 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oficina
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - deployment.yaml
+  - service.yaml
+  - hpa.yaml
+  - pdb.yaml
+
+# Sem entrada `images:` estatica de proposito: `infra-k8s/.github/workflows/cd.yml`
+# roda `kustomize edit set image` (na copia da pipeline, nao neste arquivo)
+# ANTES de cada `kubectl apply -k`, sempre lendo a imagem que ja esta rodando
+# no Deployment (ou o fallback de bootstrap documentado la) e a fixando de
+# volta - nunca uma tag fixa aqui. Uma tag estatica (ex.: `latest`, que a
+# pipeline de oficina-api nunca publica) faria cada apply desta stack
+# resetar a imagem para algo que nao existe, desfazendo o deploy mais
+# recente da aplicacao. Ver docs/arquitetura/cicd.md, secao "Divisao de
+# dono entre infra-k8s e oficina-api".

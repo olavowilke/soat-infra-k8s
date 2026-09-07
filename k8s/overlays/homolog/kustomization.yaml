@@ -1,0 +1,45 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oficina
+
+resources:
+  - ../../base
+
+patches:
+  # Réplica única: homolog não precisa de alta disponibilidade, só de um
+  # ambiente estável para validar antes do deploy em prod.
+  - target:
+      kind: Deployment
+      name: oficina-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 1
+
+  - path: patch-recursos.yaml
+
+  - target:
+      kind: ConfigMap
+      name: oficina-config
+    patch: |-
+      - op: add
+        path: /data/SPRING_PROFILES_ACTIVE
+        value: homolog
+      # Usado pelo logback-spring.xml (customFields.environment) nos logs JSON
+      # estruturados — sem esta chave, todo log de homolog/prod saía marcado
+      # "unknown" (nenhum manifesto definia ENVIRONMENT).
+      - op: add
+        path: /data/ENVIRONMENT
+        value: homolog
+
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: oficina-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 3

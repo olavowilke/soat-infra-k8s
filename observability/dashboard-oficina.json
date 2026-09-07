@@ -1,0 +1,95 @@
+{
+  "name": "Oficina API - Observabilidade",
+  "description": "Dashboard como codigo da Oficina API (Fase 3). Provisionado via Terraform (infra-k8s/terraform/newrelic.tf, recurso newrelic_one_dashboard_json), que le este arquivo com file() e substitui 'accountId': 0 pelo ID de conta real antes de enviar ao NerdGraph. Tambem pode ser importado manualmente via New Relic One > Dashboards > Import dashboard — nesse caso, substitua 'accountId': 0 pelo ID da conta de destino antes de importar.",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Visao Geral - Oficina API",
+      "description": "Volume de ordens de servico, integracoes, latencia de API, consumo de recursos e disponibilidade.",
+      "widgets": [
+        {
+          "title": "Volume diario de ordens de servico criadas",
+          "layout": { "column": 1, "row": 1, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT sum(oficina.ordens.criadas) TIMESERIES 1 day"
+              }
+            ],
+            "yAxisLeft": { "zero": true }
+          }
+        },
+        {
+          "title": "Tempo medio de execucao por status da OS",
+          "layout": { "column": 7, "row": 1, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.bar" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT average(oficina.ordens.tempo.status) FACET status"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Erros e falhas nas integracoes externas",
+          "layout": { "column": 1, "row": 4, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.bar" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT sum(oficina.integracoes.falhas) FACET integracao"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Latencia p95 das APIs (por transacao)",
+          "layout": { "column": 7, "row": 4, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.bar" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Transaction SELECT percentile(duration, 95) FACET name"
+              }
+            ]
+          }
+        },
+        {
+          "title": "CPU e memoria dos pods (oficina-api)",
+          "layout": { "column": 1, "row": 7, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.line" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM K8sContainerSample SELECT average(cpuUsedCores), average(memoryWorkingSetBytes) FACET podName WHERE podName LIKE 'oficina-api%' TIMESERIES"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Uptime dos healthchecks (/api/actuator/health/readiness)",
+          "layout": { "column": 7, "row": 7, "width": 6, "height": 3 },
+          "visualization": { "id": "viz.billboard" },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM SyntheticCheck SELECT percentage(count(*), WHERE result = 'SUCCESS') AS 'Uptime %' FACET monitorName SINCE 1 day ago"
+              }
+            ],
+            "thresholds": [
+              { "alertSeverity": "CRITICAL", "value": 99 }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

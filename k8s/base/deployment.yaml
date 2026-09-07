@@ -1,0 +1,145 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-api
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-api
+    app.kubernetes.io/part-of: oficina
+spec:
+  replicas: 2
+  # maxUnavailable: 0 garante que o rollout nunca derruba o serviço abaixo da
+  # capacidade atual; maxSurge sobe uma réplica extra antes de desligar a antiga.
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oficina-api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oficina-api
+        app.kubernetes.io/part-of: oficina
+      # Sem estas anotações o nri-prometheus (habilitado em
+      # infra-k8s/terraform/newrelic.tf via "nri-prometheus.enabled") não
+      # descobre a aplicação como alvo, e nenhuma métrica de negócio
+      # (oficina.ordens.criadas, oficina.ordens.tempo.status,
+      # oficina.integracoes.falhas, oficina.ordens.falhas) chega ao New
+      # Relic — os 3 painéis correspondentes de
+      # observability/dashboard-oficina.json e a condição de alerta
+      # "falha_processamento_os" ficariam sempre vazios.
+      #
+      # Anotamos o POD, não o Service: com 2+ réplicas (e o HPA subindo
+      # mais), um scrape no ClusterIP do Service cairia num pod sorteado a
+      # cada coleta e os contadores viriam truncados. O caminho carrega o
+      # context-path /api da aplicação (server.servlet.context-path).
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/scheme: "http"
+        prometheus.io/port: "8080"
+        prometheus.io/path: "/api/actuator/prometheus"
+    spec:
+      # Espalha os pods entre nós diferentes para que a perda de um único nó
+      # não derrube todas as réplicas ao mesmo tempo.
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              app.kubernetes.io/name: oficina-api
+      containers:
+        - name: oficina-api
+          # Sobrescrito pelo CD (kustomize edit set image) com a tag publicada
+          # no ECR pela pipeline da aplicação (oficina-api).
+          image: oficina-api:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          envFrom:
+            - configMapRef:
+                name: oficina-config
+          # Todo valor sensível (credenciais de banco, segredo JWT, chave do
+          # New Relic, credenciais SMTP) vem do Secret `oficina-secrets`, criado
+          # pela pipeline de CD a partir do SSM Parameter Store / Secrets
+          # Manager no momento do deploy — nunca versionado em texto claro.
+          env:
+            - name: DB_URL
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: DB_URL
+            - name: DB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: DB_USERNAME
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: DB_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: JWT_SECRET
+            - name: WEBHOOK_ORCAMENTO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: WEBHOOK_ORCAMENTO_TOKEN
+            - name: MAIL_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: MAIL_USERNAME
+            - name: MAIL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: MAIL_PASSWORD
+            - name: NEW_RELIC_LICENSE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: NEW_RELIC_LICENSE_KEY
+            # Também já vem via envFrom (configmap.yaml); repetido aqui,
+            # explícito, para ficar visível ao lado do NEW_RELIC_LICENSE_KEY
+            # — as condições de alerta e o painel de latência filtram por
+            # este appName exato (ver comentário em configmap.yaml).
+            - name: NEW_RELIC_APP_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: oficina-config
+                  key: NEW_RELIC_APP_NAME
+          resources:
+            # requests de CPU são essenciais para o HPA calcular a utilização
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          startupProbe:
+            httpGet:
+              path: /api/actuator/health
+              port: 8080
+            failureThreshold: 30
+            periodSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /api/actuator/health/readiness
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /api/actuator/health/liveness
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 15

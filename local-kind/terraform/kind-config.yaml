@@ -1,0 +1,13 @@
+# Configuração do cluster kind: mapeia os NodePorts da app (30080) e do Mailhog (30825)
+# para o host, permitindo acesso local via http://localhost:30080 e :30825.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    extraPortMappings:
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+      - containerPort: 30825
+        hostPort: 30825
+        protocol: TCP

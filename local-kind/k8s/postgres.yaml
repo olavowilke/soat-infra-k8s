@@ -1,0 +1,88 @@
+# PostgreSQL in-cluster: StatefulSet + PVC (volumeClaimTemplates) + Service headless.
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-db
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-db
+    app.kubernetes.io/part-of: oficina
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: oficina-db
+  ports:
+    - port: 5432
+      targetPort: 5432
+      name: postgres
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: oficina-db
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-db
+    app.kubernetes.io/part-of: oficina
+spec:
+  serviceName: oficina-db
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oficina-db
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oficina-db
+        app.kubernetes.io/part-of: oficina
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: oficina_db
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: oficina-config
+                  key: DB_USERNAME
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secret
+                  key: POSTGRES_PASSWORD
+            # PGDATA em subdiretório evita conflito com lost+found do PVC
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U oficina -d oficina_db"]
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U oficina -d oficina_db"]
+            initialDelaySeconds: 30
+            periodSeconds: 15
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi

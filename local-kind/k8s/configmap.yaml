@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oficina-config
+  namespace: oficina
+  labels:
+    app.kubernetes.io/part-of: oficina
+data:
+  # Configuração não sensível da aplicação
+  SPRING_PROFILES_ACTIVE: "prod"
+  DB_URL: "jdbc:postgresql://oficina-db:5432/oficina_db"
+  DB_USERNAME: "oficina"
+  SERVER_PORT: "8080"
+  # Notificação por e-mail (Etapa 8) — aponta para o serviço de e-mail do cluster
+  NOTIFICACAO_EMAIL_ENABLED: "true"
+  NOTIFICACAO_EMAIL_REMETENTE: "nao-responder@oficina.com"
+  MAIL_HOST: "oficina-mailhog"
+  MAIL_PORT: "1025"
+  MAIL_SMTP_AUTH: "false"
+  MAIL_SMTP_STARTTLS: "false"
+  # Habilita os grupos de probe liveness/readiness do actuator
+  MANAGEMENT_ENDPOINT_HEALTH_PROBES_ENABLED: "true"

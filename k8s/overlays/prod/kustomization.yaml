@@ -1,0 +1,50 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: oficina
+
+resources:
+  - ../../base
+
+patches:
+  # Duas réplicas como piso: sobrevive à perda de uma réplica (ou de um nó,
+  # graças ao topologySpreadConstraints do base) sem cair a zero.
+  - target:
+      kind: Deployment
+      name: oficina-api
+    patch: |-
+      - op: replace
+        path: /spec/replicas
+        value: 2
+
+  - path: patch-recursos.yaml
+
+  - target:
+      kind: ConfigMap
+      name: oficina-config
+    patch: |-
+      - op: add
+        path: /data/SPRING_PROFILES_ACTIVE
+        value: prod
+      # Usado pelo logback-spring.xml (customFields.environment) nos logs JSON
+      # estruturados — sem esta chave, todo log de homolog/prod saía marcado
+      # "unknown" (nenhum manifesto definia ENVIRONMENT).
+      - op: add
+        path: /data/ENVIRONMENT
+        value: prod
+
+  # maxReplicas: 6, não 10 — é o teto que o cluster de prod realmente
+  # aguenta hoje (2 nós t3.large, sem Cluster Autoscaler; aritmética
+  # completa em docs/adr/0003-autoscaling-com-hpa.md, seção
+  # "Consequências"). Um teto maior que a capacidade real só faz o HPA
+  # pedir réplicas que ficam presas em Pending por falta de nó.
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: oficina-api
+    patch: |-
+      - op: replace
+        path: /spec/minReplicas
+        value: 2
+      - op: replace
+        path: /spec/maxReplicas
+        value: 6

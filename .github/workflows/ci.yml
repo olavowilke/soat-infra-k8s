@@ -1,0 +1,43 @@
+name: CI - Infra K8s
+
+on:
+  push:
+    branches: [main, homolog]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  terraform:
+    name: Terraform fmt e validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: terraform
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.8
+
+      - run: terraform fmt -check -recursive
+      - run: terraform init -backend=false
+      - run: terraform validate
+
+  kustomize:
+    name: Validar manifestos Kubernetes (kustomize)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+
+      # kubectl traz o kustomize embutido (`kubectl kustomize`); renderizar os
+      # dois overlays de ambiente e falhar o job se qualquer patch apontar
+      # para um target inexistente ou o YAML gerado for invalido.
+      - name: kubectl kustomize overlays/homolog
+        run: kubectl kustomize k8s/overlays/homolog > /dev/null
+
+      - name: kubectl kustomize overlays/prod
+        run: kubectl kustomize k8s/overlays/prod > /dev/null

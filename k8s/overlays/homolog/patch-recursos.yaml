@@ -1,0 +1,20 @@
+# Homolog roda com o mesmo tier de recursos definido no base — ambiente de
+# validação, não de carga real. Mantido como patch explícito (em vez de só
+# herdar do base) para que ajustar homolog não exija tocar no base.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-api
+  namespace: oficina
+spec:
+  template:
+    spec:
+      containers:
+        - name: oficina-api
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"

@@ -1,0 +1,19 @@
+# Prod recebe mais tráfego por réplica — requests/limits maiores que o base
+# para reduzir throttling de CPU e pressão de memória sob carga real.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-api
+  namespace: oficina
+spec:
+  template:
+    spec:
+      containers:
+        - name: oficina-api
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "768Mi"
+            limits:
+              cpu: "1500m"
+              memory: "1536Mi"

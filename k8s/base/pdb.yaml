@@ -1,0 +1,15 @@
+# PodDisruptionBudget — garante que drenagens de nó e rollouts não derrubem
+# o serviço por completo (ao menos 1 réplica sempre disponível).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: oficina-api
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-api
+    app.kubernetes.io/part-of: oficina
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oficina-api

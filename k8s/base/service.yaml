@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-api
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-api
+    app.kubernetes.io/part-of: oficina
+spec:
+  # NodePort fixo: é o alvo do Target Group do NLB interno criado em
+  # infra-k8s/terraform/nlb.tf (var.node_port). Mudar este valor sem mudar o
+  # Terraform faz todo request do API Gateway cair em um buraco negro.
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: oficina-api
+  ports:
+    - port: 8080
+      targetPort: 8080
+      nodePort: 30080
+      name: http

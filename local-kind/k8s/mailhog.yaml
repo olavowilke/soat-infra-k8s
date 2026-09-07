@@ -1,0 +1,56 @@
+# Servidor SMTP de desenvolvimento no cluster (captura e-mails de notificação).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oficina-mailhog
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-mailhog
+    app.kubernetes.io/part-of: oficina
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oficina-mailhog
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oficina-mailhog
+        app.kubernetes.io/part-of: oficina
+    spec:
+      containers:
+        - name: mailhog
+          image: mailhog/mailhog:v1.0.1
+          ports:
+            - containerPort: 1025
+              name: smtp
+            - containerPort: 8025
+              name: http
+          resources:
+            requests:
+              cpu: "50m"
+              memory: "64Mi"
+            limits:
+              cpu: "200m"
+              memory: "128Mi"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: oficina-mailhog
+  namespace: oficina
+  labels:
+    app.kubernetes.io/name: oficina-mailhog
+    app.kubernetes.io/part-of: oficina
+spec:
+  type: NodePort
+  selector:
+    app.kubernetes.io/name: oficina-mailhog
+  ports:
+    - port: 1025
+      targetPort: 1025
+      name: smtp
+    - port: 8025
+      targetPort: 8025
+      nodePort: 30825
+      name: http
