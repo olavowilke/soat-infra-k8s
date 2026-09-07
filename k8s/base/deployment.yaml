@@ -93,6 +93,21 @@ spec:
                 secretKeyRef:
                   name: oficina-secrets
                   key: WEBHOOK_ORCAMENTO_TOKEN
+            # AdminInitializer cria o usuario administrador no primeiro start.
+            # Sem estas duas variaveis ele cairia no padrao publicado em
+            # application.yml (admin/admin123) e o cluster subiria com uma
+            # credencial que esta na internet. SegredosPadraoValidator recusa
+            # subir nesse caso - estas chaves sao o que evita a recusa.
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: ADMIN_PASSWORD
             - name: MAIL_USERNAME
               valueFrom:
                 secretKeyRef:
