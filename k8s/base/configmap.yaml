@@ -18,9 +18,18 @@ data:
   NEW_RELIC_APP_NAME: "oficina-api"
   # Notificação por e-mail (Etapa 8 da Fase 2) — na AWS aponta para um provedor
   # SMTP real (ex.: Amazon SES), não mais para o Mailhog do cluster kind local.
-  NOTIFICACAO_EMAIL_ENABLED: "true"
+  # false = LogNotificacaoGateway: a notificacao vira uma linha de log INFO em
+  # vez de um e-mail. Enquanto o ambiente nao tiver credencial de SMTP, o
+  # envio real so produz ERROR de autenticacao a cada mudanca de status.
+  NOTIFICACAO_EMAIL_ENABLED: "false"
   NOTIFICACAO_EMAIL_REMETENTE: "nao-responder@oficina.com"
   MAIL_HOST: "email-smtp.us-east-1.amazonaws.com"
   MAIL_PORT: "587"
   MAIL_SMTP_AUTH: "true"
   MAIL_SMTP_STARTTLS: "true"
+  # O indicador de saude do SMTP tenta autenticar no provedor a cada chamada de
+  # /api/actuator/health. Sem MAIL_USERNAME e MAIL_PASSWORD ele responde DOWN e
+  # derruba o health agregado para 503 - inclusive na rota publica do API
+  # Gateway. Ligue de novo (remova esta chave) quando o ambiente tiver
+  # credencial de SMTP.
+  MANAGEMENT_HEALTH_MAIL_ENABLED: "false"
