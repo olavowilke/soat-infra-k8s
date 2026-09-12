@@ -1,4 +1,4 @@
-# Horizontal Pod Autoscaler — escala a aplicação por consumo de CPU e memória.
+# Horizontal Pod Autoscaler — escala a aplicação por consumo de CPU.
 # Requer o metrics-server instalado no cluster (ver infra-k8s/terraform/addons.tf).
 # min/maxReplicas abaixo são o padrão; cada overlay de ambiente ajusta os
 # limites via patch (homolog: 1-3, prod: 2-10).
@@ -24,12 +24,12 @@ spec:
         target:
           type: Utilization
           averageUtilization: 60
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 75
+  # Sem métrica de memória, de propósito. A JVM reserva o heap e não devolve:
+  # em repouso o pod fica em 411 Mi contra um request de 512 Mi, ou seja 77% —
+  # acima de qualquer alvo razoável, e sem relação nenhuma com carga. O HPA
+  # nunca alcançava o alvo, escalava até maxReplicas e travava o rollout,
+  # porque o nó não comporta réplicas que só existem para satisfazer uma
+  # métrica que nunca cai. CPU sobe com carga real e volta quando ela passa.
   behavior:
     scaleUp:
       stabilizationWindowSeconds: 30
