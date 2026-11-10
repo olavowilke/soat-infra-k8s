@@ -1,19 +1,18 @@
 # infra-k8s — Cluster Kubernetes, manifestos e observabilidade
 
-Segundo dos quatro repositórios da Fase 3 e base das três aplicações da Fase 4. Provisiona a rede, o cluster
-**Amazon EKS** e o caminho privado do API Gateway (Terraform — `terraform/`)
-e contém os artefatos de
-observabilidade do **New Relic** (`observability/`) e as pipelines de CI/CD
-(`.github/workflows/`).
+Segundo dos quatro repositórios da Fase 3 e base das três aplicações da Fase 4.
+
+Ele provisiona a rede, o cluster **Amazon EKS** e o caminho privado do API Gateway (`terraform/`).
+Ele também guarda os artefatos do **New Relic** (`observability/`) e as pipelines de CI/CD (`.github/workflows/`).
 
 ## Propósito
 
-A especificação da Fase 3 exige um "cluster Kubernetes com escalabilidade"
-gerenciado por Terraform. Este repositório é o dono de toda a rede e do
-cluster: cria a VPC, as sub-redes, o EKS, o caminho privado até ele (NLB +
-VPC Link, consumidos pelo API Gateway de `lambda-auth`), o repositório ECR
-da imagem da `oficina-api` — nenhuma outra stack cria rede ou cluster.
-Desde a Fase 4, este repositório **não** é mais dono dos manifestos das aplicações.
+A Fase 3 exige um "cluster Kubernetes com escalabilidade", gerenciado por Terraform.
+Este repositório é dono de toda a rede e do cluster.
+Ele cria a VPC, as sub-redes, o EKS e o caminho privado até ele (NLB e VPC Link, usados pelo API Gateway de `lambda-auth`).
+Ele cria também o ECR da imagem da `oficina-api`. Nenhuma outra stack cria rede ou cluster.
+
+Desde a Fase 4, este repositório **não** é dono dos manifestos das aplicações.
 
 ## Tecnologias
 
@@ -48,7 +47,13 @@ Na Fase 4 o sistema tem três aplicações no mesmo cluster. Cada uma é dona do
 - Os parâmetros SSM de rede e cluster (`/oficina/<env>/network/...`, `/oficina/<env>/cluster/...`). Os serviços novos leem esses dados.
 - O script `scripts/proteger-branches.sh`, que cria o ruleset `protecao-main` em qualquer repositório.
 
-**Este repositório não é dono de:** `Deployment`, `Service`, `HPA`, Secrets, filas, bancos, ECR do Billing e do Execution, nem das rotas do gateway deles.
+**Este repositório não é dono de:**
+
+- `Deployment`, `Service`, `HPA` e Secrets das aplicações.
+- Filas e bancos.
+- ECR do Billing e do Execution.
+- Rotas do gateway deles.
+
 Cada serviço cria o listener do NLB e as rotas no próprio Terraform.
 O Security Group dos nós libera a faixa de NodePort para o VPC Link (`terraform/security.tf`).
 

@@ -1,14 +1,14 @@
 # Alertas New Relic — Oficina API
 
-Quatro condições de alerta (`NRQL Alert Conditions`) cobrindo latência,
-erros HTTP, falhas de negócio e disponibilidade, agrupadas numa
+Seis condições de alerta (`NRQL Alert Conditions`) cobrindo latência,
+erros HTTP, falhas de negócio, disponibilidade e a Saga (DLQ e `FALHOU`), agrupadas numa
 `Alert Policy` chamada `oficina-<ambiente>-oficina-api`.
 
 **Estas condições são provisionadas em Terraform**, não importadas
 manualmente: `infra-k8s/terraform/newrelic.tf` cria
-`newrelic_alert_policy.oficina` e os quatro
+`newrelic_alert_policy.oficina` e as seis
 `newrelic_nrql_alert_condition` abaixo (`latencia_p95`, `erros_5xx`,
-`falha_processamento_os`, `uptime_healthcheck`), guardados por
+`falha_processamento_os`, `uptime_healthcheck`, `dlq_com_mensagens`, `saga_falhou`), guardados por
 `count = local.newrelic_configured ? 1 : 0` — ou seja, só existem quando
 `var.newrelic_account_id` e `var.newrelic_api_key` estão preenchidas
 (mesmo padrão de `count` já usado no bundle Helm de observabilidade). Este
