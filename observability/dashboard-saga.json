@@ -175,7 +175,7 @@
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "FROM Log SELECT timestamp, service.name, level, sagaId, message WHERE sagaId IS NOT NULL LIMIT 100"
+                "query": "FROM Log SELECT timestamp, service, level, sagaId, message WHERE sagaId IS NOT NULL LIMIT 100"
               }
             ]
           }
@@ -195,7 +195,7 @@
             "nrqlQueries": [
               {
                 "accountId": 0,
-                "query": "FROM Log SELECT count(*) WHERE sagaId IS NOT NULL FACET service.name, level"
+                "query": "FROM Log SELECT count(*) WHERE sagaId IS NOT NULL FACET service, level"
               }
             ]
           }
