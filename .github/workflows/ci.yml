@@ -30,14 +30,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
-
-      # kubectl traz o kustomize embutido (`kubectl kustomize`); renderizar os
-      # dois overlays de ambiente e falhar o job se qualquer patch apontar
-      # para um target inexistente ou o YAML gerado for invalido.
-      - name: kubectl kustomize overlays/homolog
-        run: kubectl kustomize k8s/overlays/homolog > /dev/null
-
-      - name: kubectl kustomize overlays/prod
-        run: kubectl kustomize k8s/overlays/prod > /dev/null
+      # Os manifestos Kubernetes da oficina-api passaram para o repositorio
+      # soat-oficina-api (Fase 4); aqui nao ha mais overlay para renderizar.
+      # O job continua com este nome porque ele e um check obrigatorio.
+      - name: Sem manifestos neste repositorio
+        run: echo "Manifestos da oficina-api vivem em soat-oficina-api/k8s."

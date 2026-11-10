@@ -2,7 +2,7 @@
 
 Segundo dos quatro repositórios da Fase 3. Provisiona a rede, o cluster
 **Amazon EKS** e o caminho privado do API Gateway (Terraform — `terraform/`)
-e contém os manifestos **Kubernetes** da aplicação (`k8s/`), os artefatos de
+e contém os artefatos de
 observabilidade do **New Relic** (`observability/`) e as pipelines de CI/CD
 (`.github/workflows/`).
 
@@ -24,12 +24,12 @@ outra stack deste projeto cria rede, cluster ou ECR.
 | Cluster | Amazon **EKS**, node group gerenciado (Auto Scaling Group) |
 | Rede | VPC dedicada, sub-redes privadas, NLB interno (`aws_lb`), VPC Link (`aws_apigatewayv2_vpc_link`) |
 | Registro de imagens | Amazon **ECR** (`aws_ecr_repository.oficina_api`) |
-| Orquestração | Kubernetes via **Kustomize** (`k8s/base` + overlays `homolog`/`prod`) |
+| Orquestração | Kubernetes (EKS). Os manifestos da `oficina-api` vivem em `soat-oficina-api/k8s` |
 | Autoscaling | `HorizontalPodAutoscaler` (CPU/memória) + `metrics-server` (addon) |
 | Observabilidade | New Relic (`nri-bundle` via Helm + dashboard/alertas via NerdGraph/Terraform) |
 | Contrato entre stacks | AWS SSM Parameter Store (`/oficina/<env>/...`) |
 | Backend do estado | S3 parcial (`terraform init -backend-config=...` na pipeline) |
-| CI/CD | GitHub Actions (`fmt`/`validate`/`kustomize build` em PR, `apply`/`kubectl apply -k` via OIDC no push) |
+| CI/CD | GitHub Actions (`fmt`/`validate` em PR, `terraform apply` via OIDC no push) |
 
 ## Diagrama da stack
 
@@ -75,9 +75,6 @@ flowchart TB
 infra-k8s/
 ├── terraform/                 # VPC, EKS, NLB interno, VPC Link, addons, New Relic (cluster)
 │   └── environments/{homolog,prod}.tfvars
-├── k8s/
-│   ├── base/                  # Namespace, ConfigMap, Deployment, Service, HPA, PDB
-│   └── overlays/{homolog,prod}/  # patches por ambiente (réplicas, HPA, recursos, profile)
 ├── observability/
 │   ├── dashboard-oficina.json # dashboard New Relic como código
 │   └── alertas.md             # condições de alerta NRQL
@@ -126,64 +123,18 @@ SSM (ADR-0005) existe para evitar. Por isso, por ambiente:
 Detalhado também em `observability/alertas.md`, seção "O monitor sintético e
 o apply em duas fases".
 
-### 1ª execução do `cd.yml` também é "em duas fases" (Secret `oficina-secrets`)
+### Secret `oficina-secrets`
 
-Pela mesma ordem de apply (`infra-k8s → infra-database → lambda-auth →
-aplicação`), o passo "Criar/atualizar Secret oficina-secrets" do `cd.yml`
-lê `/oficina/<env>/database/*` (publicado por `infra-database`) e
-`/oficina/<env>/auth/jwt-secret-arn` (publicado por `lambda-auth`) — ambos
-inexistentes na 1ª execução deste workflow num ambiente novo, porque as
-duas stacks das quais eles vêm ainda não rodaram. O passo tolera isso: se
-qualquer um desses parâmetros SSM ainda não existir, ele **pula** a
-criação/atualização do Secret (em vez de abortar o job) e imprime um aviso
-explícito no log. `kubectl apply -k` continua rodando normalmente logo
-depois — Namespace, ConfigMap, Deployment, Service, HPA e PDB sobem —, só
-os pods ficam sem as credenciais de banco/JWT até o Secret existir.
+O CD de `soat-oficina-api` cria o Secret. Ele tolera a ordem de apply: se os
+parâmetros SSM de `infra-database` e `lambda-auth` não existirem, ele avisa e
+pula o passo.
 
-Por isso, na primeira vez que uma stack sobe em um ambiente novo:
+## Manifestos Kubernetes
 
-1. **1º apply** de `infra-k8s` — cluster, rede, NLB, ECR sobem; o passo do
-   Secret é pulado (aviso no log), e os pods de `oficina-api` (se já
-   existirem) ficam com `CrashLoopBackOff`/config incompleta até o passo 3.
-2. Aplica `infra-database` e depois `lambda-auth` (publicam os parâmetros
-   que faltavam).
-3. **Reexecute** `infra-k8s/cd.yml` (novo push ou `workflow_dispatch`) —
-   agora os parâmetros existem, o Secret é criado de verdade, e o próximo
-   deploy da aplicação encontra as credenciais no ar.
-
-## Kubernetes (`k8s/`)
-
-`k8s/base/` reaproveita os manifestos validados na Fase 2 (`local-kind/k8s/`),
-com as adaptações necessárias para rodar na AWS:
-
-| Mudança | Motivo |
-|---|---|
-| `Service` `NodePort` fixo em `30080` | precisa bater com `terraform/nlb.tf` (`var.node_port`) |
-| Probes em `/api/actuator/health/{liveness,readiness}` | context-path `/api` da aplicação |
-| Toda credencial via `secretKeyRef` do Secret `oficina-secrets` | nenhum segredo é versionado; o Secret é criado pelo CD a partir do SSM/Secrets Manager |
-| Sem `postgres.yaml`/`mailhog.yaml` | na AWS o banco é o RDS (`infra-database`) e o e-mail é um provedor SMTP real |
-| `PodDisruptionBudget` (`minAvailable: 1`) | rollout/drenagem de nó não derruba o serviço |
-| `topologySpreadConstraints` por `kubernetes.io/hostname` | réplicas espalhadas entre nós |
-| `strategy.rollingUpdate.maxUnavailable: 0` | rollout nunca reduz a capacidade disponível |
-
-### Overlays (`k8s/overlays/<ambiente>/`)
-
-Cada overlay usa `namespace: oficina` e só contém **patches** (nunca duplica
-o `Deployment` inteiro):
-
-| | `homolog` | `prod` |
-|---|---|---|
-| Réplicas | 1 | 2 |
-| HPA | min 1 / max 3 | min 2 / max 10 |
-| Recursos (request/limit) | 250m·512Mi / 1000m·1Gi (igual ao base) | 500m·768Mi / 1500m·1536Mi |
-| `SPRING_PROFILES_ACTIVE` | `homolog` | `prod` |
-
-### Validar localmente
-
-```bash
-kubectl kustomize infra-k8s/k8s/overlays/homolog > /dev/null
-kubectl kustomize infra-k8s/k8s/overlays/prod > /dev/null
-```
+Os manifestos da `oficina-api` (Namespace, ConfigMap, Deployment, Service, HPA,
+PDB) passaram para o repositório `soat-oficina-api` (`k8s/`) na Fase 4.
+O `Service` usa `NodePort` fixo em `30080`. Esse valor precisa bater com
+`terraform/nlb.tf` (`var.node_port`).
 
 ## Observabilidade (`observability/`)
 
@@ -217,35 +168,12 @@ observabilidade do cluster.
 ## Pipelines (`.github/workflows/`)
 
 - **`ci.yml`** — `terraform fmt -check` + `terraform validate` (sem backend)
-  e `kubectl kustomize` dos dois overlays, em todo push/PR.
-- **`cd.yml`** — em push para `homolog`/`main` (ou `workflow_dispatch`):
-  autentica na AWS via OIDC → `terraform apply` (cluster, rede, NLB, New
-  Relic) → `aws eks update-kubeconfig` → cria/atualiza o Secret
-  `oficina-secrets` a partir do SSM Parameter Store e do Secrets Manager →
-  **lê a imagem hoje em execução no `Deployment`** (preserva o que já está
-  rodando; no *bootstrap*, quando o `Deployment` ainda não existe, cai para
-  `<ECR>:<ambiente>` com aviso explícito no log — qualquer outra falha do
-  `kubectl get` aborta o job em vez de arriscar um fallback silencioso) →
-  `kustomize edit set image` com essa imagem → `kubectl apply -k
-  k8s/overlays/<ambiente>` → `kubectl rollout status`.
-
-  `k8s/base/kustomization.yaml` não fixa nenhuma tag de imagem de propósito
-  — chegou a fixar `newTag: latest` (uma tag que a pipeline de
-  `oficina-api` nunca publica), o que fazia cada `kubectl apply -k` desta
-  stack resetar a imagem para uma tag inexistente e desfazer o deploy mais
-  recente da aplicação. Por isso o passo acima sempre determina a imagem a
-  partir do cluster (ou de uma tag manual via `workflow_dispatch`) antes do
-  `apply` — nunca de um valor estático no repositório.
-
-  O rollout de uma **nova imagem** da aplicação é feito pela pipeline do
-  próprio `oficina-api` (Tarefa 6), que só troca a tag do `Deployment` já
-  existente via `kubectl set image` — sem conhecer kustomize, overlays ou
-  qualquer outro campo do manifesto. Esta pipeline (`infra-k8s`) é quem
-  continua dona do estado desejado do `Deployment` (réplicas, HPA, PDB
-  etc.) e garante que o cluster e os manifestos base já existem e estão
-  saudáveis antes de `oficina-api` rodar; a divisão evita que uma stack
-  precise ler arquivos (manifestos/overlays) de outro repositório depois do
-  split (ver comentário de cabeçalho de `oficina-api/.github/workflows/cd.yml`).
+  em todo push/PR. O job `Validar manifestos Kubernetes (kustomize)` não
+  renderiza mais nada e só passa. Ele existe porque é um check obrigatório.
+- **`cd.yml`** — em push para `main` (ou `workflow_dispatch`): autentica na
+  AWS via OIDC e roda `terraform apply` (cluster, rede, NLB, ECR, New Relic).
+  O Secret `oficina-secrets`, os manifestos e o rollout da imagem pertencem
+  ao CD de `soat-oficina-api`.
 
   O repositório ECR (`aws_ecr_repository.oficina_api`, em `ecr.tf`) também é
   provisionado por esta stack — nenhuma outra stack deste projeto cria ECR.
@@ -262,9 +190,6 @@ observabilidade do cluster.
   | `AWS_DEPLOY_ROLE_ARN` | Secret | O passo "Credenciais AWS (OIDC)" falha ao assumir a role — nenhum comando Terraform/`kubectl` seguinte consegue autenticar |
   | `TF_STATE_BUCKET` | Secret | `terraform init` falha (backend S3 sem bucket) |
   | `TF_LOCK_TABLE` | Secret | `terraform init` falha (backend sem tabela de lock DynamoDB) |
-  | `WEBHOOK_ORCAMENTO_TOKEN` | Secret | O Secret `oficina-secrets` é criado com o valor vazio — o webhook de decisão de orçamento da aplicação rejeita todas as chamadas (token não bate) |
-  | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Secrets | **Obrigatórios.** O passo "Criar/atualizar Secret oficina-secrets" aborta com erro explícito. São as credenciais do usuário administrador que o `AdminInitializer` cria no primeiro start. Sem elas a aplicação cairia no padrão `admin`/`admin123` publicado em `application.yml` — e este repositório é público. O `SegredosPadraoValidator` recusa subir nesse caso |
-  | `MAIL_USERNAME` / `MAIL_PASSWORD` | Secrets | O Secret `oficina-secrets` sobe com credenciais SMTP vazias — a aplicação continua no ar, mas o envio real de e-mail de notificação falha silenciosamente (fica só em log, mesmo com `NOTIFICACAO_EMAIL_ENABLED=true`) |
   | `AWS_REGION` | Variable | Opcional — sem ela, a pipeline usa `us-east-1` como padrão |
 
   A mesma role `AWS_DEPLOY_ROLE_ARN` é assumida pela pipeline da aplicação
