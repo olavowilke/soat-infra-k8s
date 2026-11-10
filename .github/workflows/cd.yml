@@ -1,8 +1,8 @@
 name: CD - Deploy EKS + Kubernetes
 
-# Deploy automatico das branches de homologacao e producao (requisito da Fase 3).
-#   homolog -> ambiente homolog
-#   main    -> ambiente prod
+# Deploy automatico da branch main no ambiente homolog (Fase 4).
+#   main -> ambiente homolog
+# A variavel de repositorio DEPLOY_HOMOLOG controla o deploy: so roda se for "true".
 # Ordem entre stacks: infra-k8s -> infra-database -> lambda-auth -> aplicacao.
 # Esta pipeline cria/atualiza o cluster EKS e os manifestos base (Namespace,
 # ConfigMap, Deployment, Service, HPA, PDB); o rollout de uma nova imagem da
@@ -20,7 +20,7 @@ name: CD - Deploy EKS + Kubernetes
 # a imagem, a nao ser que o operador peca outra via workflow_dispatch.
 on:
   push:
-    branches: [main, homolog]
+    branches: [main]
   workflow_dispatch:
     inputs:
       ambiente:
@@ -28,7 +28,7 @@ on:
         required: true
         default: homolog
         type: choice
-        options: [homolog, prod]
+        options: [homolog]
       image_tag:
         description: >-
           Tag manual da imagem oficina-api a aplicar (ECR). Deixe vazio
@@ -44,11 +44,12 @@ permissions:
 
 jobs:
   deploy:
+    if: vars.DEPLOY_HOMOLOG == 'true'
     name: terraform apply + kubectl apply -k
     runs-on: ubuntu-latest
-    environment: ${{ github.event.inputs.ambiente || (github.ref_name == 'main' && 'prod' || 'homolog') }}
+    environment: homolog
     env:
-      AMBIENTE: ${{ github.event.inputs.ambiente || (github.ref_name == 'main' && 'prod' || 'homolog') }}
+      AMBIENTE: homolog
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
       IMAGE_TAG_MANUAL: ${{ github.event.inputs.image_tag }}
     steps:
@@ -160,6 +161,22 @@ jobs:
 
           DB_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${DB_NAME}"
 
+          # Credenciais do usuario administrador da aplicacao. Nao vem de
+          # nenhuma stack Terraform - sao escolha de quem opera o ambiente,
+          # entao vivem como Secrets do GitHub Actions. Abortamos aqui, com
+          # mensagem clara, em vez de deixar a aplicacao cair no padrao
+          # publicado em application.yml (admin/admin123): esse padrao esta
+          # num repositorio publico, e SegredosPadraoValidator recusa subir
+          # com ele fora de dev - o pod entraria em CrashLoopBackOff com um
+          # erro bem menos obvio que este.
+          ADMIN_USERNAME="${{ secrets.ADMIN_USERNAME }}"
+          ADMIN_PASSWORD="${{ secrets.ADMIN_PASSWORD }}"
+          if [ -z "${ADMIN_USERNAME}" ] || [ -z "${ADMIN_PASSWORD}" ]; then
+            echo "ERRO: defina os secrets ADMIN_USERNAME e ADMIN_PASSWORD neste repositorio." >&2
+            echo "ERRO: sem eles a aplicacao subiria com a senha de exemplo publicada no repositorio." >&2
+            exit 1
+          fi
+
           kubectl create namespace oficina --dry-run=client -o yaml | kubectl apply -f -
           kubectl create secret generic oficina-secrets \
             --namespace oficina \
@@ -168,6 +185,8 @@ jobs:
             --from-literal=DB_PASSWORD="${DB_PASSWORD}" \
             --from-literal=JWT_SECRET="${JWT_SECRET}" \
             --from-literal=WEBHOOK_ORCAMENTO_TOKEN="${{ secrets.WEBHOOK_ORCAMENTO_TOKEN }}" \
+            --from-literal=ADMIN_USERNAME="${ADMIN_USERNAME}" \
+            --from-literal=ADMIN_PASSWORD="${ADMIN_PASSWORD}" \
             --from-literal=MAIL_USERNAME="${{ secrets.MAIL_USERNAME }}" \
             --from-literal=MAIL_PASSWORD="${{ secrets.MAIL_PASSWORD }}" \
             --from-literal=NEW_RELIC_LICENSE_KEY="${{ secrets.NEW_RELIC_LICENSE_KEY }}" \
@@ -199,7 +218,7 @@ jobs:
       # com aviso explicito no log. Qualquer falha do `kubectl get` que NAO
       # seja um "nao encontrado" genuino (kubeconfig quebrado, sem permissao,
       # cluster fora do ar) aborta o job em vez de arriscar um fallback
-      # silencioso por cima de uma imagem em producao - essa distincao e a
+      # silencioso por cima de uma imagem em execucao - essa distincao e a
       # correcao central: um fallback silencioso sobre um erro real e
       # exatamente a classe de bug que resetava a imagem para "latest".
       - name: Determinar a imagem a aplicar (preserva a que ja esta rodando)

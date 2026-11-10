@@ -51,3 +51,23 @@ resource "aws_ssm_parameter" "ecr_repository_url" {
   type  = "String"
   value = aws_ecr_repository.oficina_api.repository_url
 }
+
+# Publicados para os novos microservicos (Fase 4) se conectarem ao NLB e aos nos.
+resource "aws_ssm_parameter" "nlb_arn" {
+  name  = "${local.ssm_base}/network/nlb-arn"
+  type  = "String"
+  value = aws_lb.interno.arn
+}
+
+# CSV: os consumidores fazem split(",", ...) diretamente.
+resource "aws_ssm_parameter" "node_asg_names" {
+  name  = "${local.ssm_base}/network/node-asg-names"
+  type  = "String"
+  value = join(",", module.eks.eks_managed_node_groups["principal"].node_group_autoscaling_group_names)
+}
+
+resource "aws_ssm_parameter" "vpc_cidr" {
+  name  = "${local.ssm_base}/network/vpc-cidr"
+  type  = "String"
+  value = module.vpc.vpc_cidr_block
+}

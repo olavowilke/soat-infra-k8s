@@ -39,7 +39,7 @@ resource "aws_security_group_rule" "nos_ingress_nodeport" {
   type                     = "ingress"
   security_group_id        = module.eks.node_security_group_id
   from_port                = var.node_port
-  to_port                  = var.node_port
+  to_port                  = var.node_port_range_end
   protocol                 = "tcp"
   source_security_group_id = aws_security_group.vpc_link.id
   description              = "NodePort da aplicacao a partir do VPC Link (API Gateway)"
@@ -62,7 +62,7 @@ resource "aws_security_group_rule" "nos_ingress_nodeport_health_check" {
   type              = "ingress"
   security_group_id = module.eks.node_security_group_id
   from_port         = var.node_port
-  to_port           = var.node_port
+  to_port           = var.node_port_range_end
   protocol          = "tcp"
   cidr_blocks       = [module.vpc.vpc_cidr_block]
   description       = "Health check do NLB interno no NodePort - origem e o ENI do proprio NLB, nao a SG do VPC Link"
