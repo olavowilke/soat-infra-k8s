@@ -68,6 +68,12 @@ variable "node_port" {
   default     = 30080
 }
 
+variable "node_port_range_end" {
+  description = "Fim da faixa de NodePort liberada nos nos (novos servicos usam 30081 e 30082)"
+  type        = number
+  default     = 30082
+}
+
 variable "newrelic_license_key" {
   description = "Chave de licenca do New Relic (vazio desativa a observabilidade)"
   type        = string
