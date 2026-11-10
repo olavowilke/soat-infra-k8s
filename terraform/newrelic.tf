@@ -90,6 +90,19 @@ resource "newrelic_one_dashboard_json" "oficina" {
   )
 }
 
+# Dashboard da saga (Fase 4): sagas por estado, resultados por hora, DLQ por
+# fila, logs por sagaId e traces dos tres servicos. Mesmo tratamento de
+# accountId do dashboard acima.
+resource "newrelic_one_dashboard_json" "saga" {
+  count = local.newrelic_configured ? 1 : 0
+
+  json = replace(
+    file("${path.module}/../observability/dashboard-saga.json"),
+    "\"accountId\": 0",
+    "\"accountId\": ${var.newrelic_account_id}"
+  )
+}
+
 # Policy + condicoes NRQL documentadas em observability/alertas.md. Sem canal
 # de notificacao anexado: os canais previstos no documento (Slack, PagerDuty)
 # exigem credenciais (webhook URL, integration key) que este projeto nao tem
@@ -206,6 +219,54 @@ resource "newrelic_nrql_alert_condition" "uptime_healthcheck" {
     threshold             = 99
     threshold_duration    = 1800
     threshold_occurrences = "ALL"
+  }
+}
+
+# 5. Mensagem em qualquer DLQ (oficina-api, billing-service, execution-service)
+# por 5 minutos. A metrica vem do MetricasFilas de cada servico.
+resource "newrelic_nrql_alert_condition" "dlq_com_mensagens" {
+  count = local.newrelic_configured ? 1 : 0
+
+  policy_id                    = newrelic_alert_policy.oficina[0].id
+  type                         = "static"
+  name                         = "Saga - mensagens em DLQ"
+  description                  = "oficina_fila_dlq_mensagens acima de 0 por 5 minutos em qualquer fila."
+  enabled                      = true
+  violation_time_limit_seconds = 3600
+
+  nrql {
+    query = "FROM Metric SELECT max(oficina_fila_dlq_mensagens) FACET fila"
+  }
+
+  critical {
+    operator              = "above"
+    threshold             = 0
+    threshold_duration    = 300
+    threshold_occurrences = "ALL"
+  }
+}
+
+# 6. Saga que terminou em FALHOU. O nri-prometheus envia o counter como
+# delta, entao a soma da janela de 5 minutos e o aumento no periodo.
+resource "newrelic_nrql_alert_condition" "saga_falhou" {
+  count = local.newrelic_configured ? 1 : 0
+
+  policy_id                    = newrelic_alert_policy.oficina[0].id
+  type                         = "static"
+  name                         = "Saga - saga terminou em FALHOU"
+  description                  = "oficina_saga_finalizadas_total{resultado=FALHOU} aumentou em uma janela de 5 minutos."
+  enabled                      = true
+  violation_time_limit_seconds = 3600
+
+  nrql {
+    query = "FROM Metric SELECT sum(oficina_saga_finalizadas_total) WHERE resultado = 'FALHOU'"
+  }
+
+  critical {
+    operator              = "above"
+    threshold             = 0
+    threshold_duration    = 300
+    threshold_occurrences = "AT_LEAST_ONCE"
   }
 }
 

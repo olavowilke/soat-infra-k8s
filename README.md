@@ -1,20 +1,18 @@
 # infra-k8s — Cluster Kubernetes, manifestos e observabilidade
 
-Segundo dos quatro repositórios da Fase 3. Provisiona a rede, o cluster
-**Amazon EKS** e o caminho privado do API Gateway (Terraform — `terraform/`)
-e contém os artefatos de
-observabilidade do **New Relic** (`observability/`) e as pipelines de CI/CD
-(`.github/workflows/`).
+Segundo dos quatro repositórios da Fase 3 e base das três aplicações da Fase 4.
+
+Ele provisiona a rede, o cluster **Amazon EKS** e o caminho privado do API Gateway (`terraform/`).
+Ele também guarda os artefatos do **New Relic** (`observability/`) e as pipelines de CI/CD (`.github/workflows/`).
 
 ## Propósito
 
-A especificação da Fase 3 exige um "cluster Kubernetes com escalabilidade"
-gerenciado por Terraform. Este repositório é o dono de toda a rede e do
-cluster: cria a VPC, as sub-redes, o EKS, o caminho privado até ele (NLB +
-VPC Link, consumidos pelo API Gateway de `lambda-auth`), o repositório ECR
-da imagem da aplicação e aplica os manifestos base (`Deployment`,
-`Service`, `HorizontalPodAutoscaler`, `PodDisruptionBudget`) — nenhuma
-outra stack deste projeto cria rede, cluster ou ECR.
+A Fase 3 exige um "cluster Kubernetes com escalabilidade", gerenciado por Terraform.
+Este repositório é dono de toda a rede e do cluster.
+Ele cria a VPC, as sub-redes, o EKS e o caminho privado até ele (NLB e VPC Link, usados pelo API Gateway de `lambda-auth`).
+Ele cria também o ECR da imagem da `oficina-api`. Nenhuma outra stack cria rede ou cluster.
+
+Desde a Fase 4, este repositório **não** é dono dos manifestos das aplicações.
 
 ## Tecnologias
 
@@ -31,7 +29,48 @@ outra stack deste projeto cria rede, cluster ou ECR.
 | Backend do estado | S3 parcial (`terraform init -backend-config=...` na pipeline) |
 | CI/CD | GitHub Actions (`fmt`/`validate` em PR, `terraform apply` via OIDC no push) |
 
-## Diagrama da stack
+## Fase 4 — o que este repositório é dono
+
+Na Fase 4 o sistema tem três aplicações no mesmo cluster. Cada uma é dona dos próprios manifestos, do próprio Terraform de fila e banco e do próprio CD.
+
+| Dono | Namespace | NodePort | Porta do NLB | Repositório dos manifestos |
+|---|---|---|---|---|
+| `oficina-api` (OS Service) | `oficina` | 30080 | 80 | [`soat-oficina-api`](https://github.com/olavowilke/soat-oficina-api) (`k8s/`) |
+| `billing-service` | `billing` | 30081 | 8081 | [`soat-billing-service`](https://github.com/olavowilke/soat-billing-service) (`k8s/`) |
+| `execution-service` | `execucao` | 30082 | 8082 | [`soat-execution-service`](https://github.com/olavowilke/soat-execution-service) (`k8s/`) |
+
+**Este repositório é dono de:**
+
+- VPC, EKS, NLB interno, VPC Link e o ECR da `oficina-api` (`terraform/`).
+- Add-ons do cluster: `metrics-server` e `nri-bundle` (New Relic), em `terraform/addons.tf`.
+- O dashboard e os alertas do New Relic, em `terraform/newrelic.tf` e `observability/`.
+- Os parâmetros SSM de rede e cluster (`/oficina/<env>/network/...`, `/oficina/<env>/cluster/...`). Os serviços novos leem esses dados.
+- O script `scripts/proteger-branches.sh`, que cria o ruleset `protecao-main` em qualquer repositório.
+
+**Este repositório não é dono de:**
+
+- `Deployment`, `Service`, `HPA` e Secrets das aplicações.
+- Filas e bancos.
+- ECR do Billing e do Execution.
+- Rotas do gateway deles.
+
+Cada serviço cria o listener do NLB e as rotas no próprio Terraform.
+O Security Group dos nós libera a faixa de NodePort para o VPC Link (`terraform/security.tf`).
+
+### New Relic da Saga
+
+| Artefato | Arquivo | O que mostra |
+|---|---|---|
+| Dashboard da Saga | [`observability/dashboard-saga.json`](observability/dashboard-saga.json) | Sagas ativas por estado, sagas finalizadas por resultado, mensagens por DLQ, logs por `sagaId`, spans por serviço e traces distribuídos |
+| Alerta "Saga - mensagens em DLQ" | `newrelic_nrql_alert_condition.dlq_com_mensagens` | `oficina_fila_dlq_mensagens` acima de 0 por 5 minutos, por fila |
+| Alerta "Saga - saga terminou em FALHOU" | `newrelic_nrql_alert_condition.saga_falhou` | Qualquer saga `FALHOU` em 5 minutos |
+
+Os alertas e o dashboard só existem com `NEW_RELIC_ACCOUNT_ID` e `NEW_RELIC_API_KEY` preenchidos.
+Os detalhes dos alertas estão em [`observability/alertas.md`](observability/alertas.md).
+
+## Diagrama da stack (Fase 3)
+
+O desenho mostra só a `oficina-api`. O desenho completo da Fase 4 está no [README do OS Service](https://github.com/olavowilke/soat-oficina-api#fase-4--microsserviços-e-saga).
 
 ```mermaid
 flowchart TB
@@ -77,7 +116,10 @@ infra-k8s/
 │   └── environments/{homolog,prod}.tfvars
 ├── observability/
 │   ├── dashboard-oficina.json # dashboard New Relic como código
-│   └── alertas.md             # condições de alerta NRQL
+│   ├── dashboard-saga.json    # dashboard da Saga (Fase 4)
+│   └── alertas.md             # condições de alerta NRQL (6 condições)
+├── scripts/
+│   └── proteger-branches.sh   # ruleset protecao-main dos repositórios
 ├── local-kind/                # setup local (kind) herdado da Fase 2 — não usado na AWS
 │   ├── k8s/                   # manifestos completos p/ kind (inclui Postgres e Mailhog)
 │   └── terraform/             # provider kind, cria o cluster local + aplica local-kind/k8s
@@ -133,6 +175,7 @@ pula o passo.
 
 Os manifestos da `oficina-api` (Namespace, ConfigMap, Deployment, Service, HPA,
 PDB) passaram para o repositório `soat-oficina-api` (`k8s/`) na Fase 4.
+Os do Billing e os do Execution vivem nos repositórios deles.
 O `Service` usa `NodePort` fixo em `30080`. Esse valor precisa bater com
 `terraform/nlb.tf` (`var.node_port`).
 
@@ -158,9 +201,14 @@ Os arquivos aqui não são só documentação — são a fonte que
   notificação anexado** (Slack/PagerDuty exigem credenciais — webhook URL,
   integration key — que este projeto não tem configuradas); anexar um canal
   é um passo manual na conta New Relic real, documentado no próprio arquivo.
+- **`dashboard-saga.json`** — dashboard da Saga (Fase 4), provisionado por
+  `newrelic_one_dashboard_json.saga`. Usa as métricas `oficina_saga_*` e
+  `oficina_fila_dlq_mensagens`, além de logs por `sagaId` e traces distribuídos.
+- **Alertas 5 e 6** — "mensagens em DLQ" e "Saga terminou em FALHOU". Estão
+  descritos no fim de `alertas.md`.
 
-Todos os recursos NerdGraph acima (`newrelic_one_dashboard_json`,
-`newrelic_alert_policy`, `newrelic_nrql_alert_condition` × 4) ficam com
+Todos os recursos NerdGraph acima (`newrelic_one_dashboard_json` × 2,
+`newrelic_alert_policy`, `newrelic_nrql_alert_condition` × 6) ficam com
 `count = 0` (não existem) enquanto `newrelic_account_id`/`newrelic_api_key`
 estiverem vazias — mesmo padrão de guarda já usado para o bundle Helm de
 observabilidade do cluster.
@@ -234,7 +282,9 @@ Este repositório não expõe API própria — provisiona o cluster e a rede que
 hospedam a aplicação. A documentação interativa das rotas é o Swagger da
 aplicação (`oficina-api`), acessível através do caminho provisionado aqui:
 
-- Swagger UI (via API Gateway, `lambda-auth`): `https://<api_endpoint>/api/swagger-ui.html`
+- Swagger UI da OS (via API Gateway, `lambda-auth`): `https://<api_endpoint>/api/swagger-ui.html`
+- Swagger UI do Billing: `https://<api_endpoint>/api/billing/swagger-ui/index.html`
+- Swagger UI do Execution: `https://<api_endpoint>/api/execucao/swagger-ui/index.html`
 - Swagger UI (direto no cluster, dentro da VPC): `http://<nlb-interno>/api/swagger-ui.html`
 - OpenAPI JSON: `https://<api_endpoint>/api/v3/api-docs`
 
@@ -245,7 +295,8 @@ aplicação (`oficina-api`), acessível através do caminho provisionado aqui:
 - [`docs/arquitetura/componentes.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/arquitetura/componentes.md) — diagrama de componentes de todo o sistema
 - [`docs/arquitetura/cicd.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/arquitetura/cicd.md) — pipelines, ordem de apply e secrets/variables de todos os repositórios
 - [`docs/adr/0003-autoscaling-com-hpa.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/adr/0003-autoscaling-com-hpa.md) — ADR do autoscaling via HPA
-- [`docs/adr/0002-comunicacao-sincrona-via-api-gateway.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/adr/0002-comunicacao-sincrona-via-api-gateway.md) — ADR da comunicação síncrona via API Gateway
+- [`docs/adr/0006-microsservicos-e-saga-orquestrada.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/adr/0006-microsservicos-e-saga-orquestrada.md) — ADR dos microsserviços e da Saga (Fase 4)
+- [`docs/adr/0002-comunicacao-sincrona-via-api-gateway.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/adr/0002-comunicacao-sincrona-via-api-gateway.md) — ADR da comunicação síncrona via API Gateway (substituída pela ADR 0006)
 - [`docs/rfc/001-escolha-da-nuvem.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/rfc/001-escolha-da-nuvem.md) — RFC da escolha do provedor de nuvem
 - [`docs/rfc/002-api-gateway.md`](https://github.com/olavowilke/soat-oficina-api/blob/main/docs/rfc/002-api-gateway.md) — RFC da escolha do API Gateway
 
