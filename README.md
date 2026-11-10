@@ -263,6 +263,7 @@ observabilidade do cluster.
   | `TF_STATE_BUCKET` | Secret | `terraform init` falha (backend S3 sem bucket) |
   | `TF_LOCK_TABLE` | Secret | `terraform init` falha (backend sem tabela de lock DynamoDB) |
   | `WEBHOOK_ORCAMENTO_TOKEN` | Secret | O Secret `oficina-secrets` é criado com o valor vazio — o webhook de decisão de orçamento da aplicação rejeita todas as chamadas (token não bate) |
+  | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Secrets | **Obrigatórios.** O passo "Criar/atualizar Secret oficina-secrets" aborta com erro explícito. São as credenciais do usuário administrador que o `AdminInitializer` cria no primeiro start. Sem elas a aplicação cairia no padrão `admin`/`admin123` publicado em `application.yml` — e este repositório é público. O `SegredosPadraoValidator` recusa subir nesse caso |
   | `MAIL_USERNAME` / `MAIL_PASSWORD` | Secrets | O Secret `oficina-secrets` sobe com credenciais SMTP vazias — a aplicação continua no ar, mas o envio real de e-mail de notificação falha silenciosamente (fica só em log, mesmo com `NOTIFICACAO_EMAIL_ENABLED=true`) |
   | `AWS_REGION` | Variable | Opcional — sem ela, a pipeline usa `us-east-1` como padrão |
 

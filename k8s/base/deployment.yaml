@@ -93,6 +93,21 @@ spec:
                 secretKeyRef:
                   name: oficina-secrets
                   key: WEBHOOK_ORCAMENTO_TOKEN
+            # AdminInitializer cria o usuario administrador no primeiro start.
+            # Sem estas duas variaveis ele cairia no padrao publicado em
+            # application.yml (admin/admin123) e o cluster subiria com uma
+            # credencial que esta na internet. SegredosPadraoValidator recusa
+            # subir nesse caso - estas chaves sao o que evita a recusa.
+            - name: ADMIN_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: ADMIN_USERNAME
+            - name: ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: oficina-secrets
+                  key: ADMIN_PASSWORD
             - name: MAIL_USERNAME
               valueFrom:
                 secretKeyRef:
@@ -127,7 +142,13 @@ spec:
               memory: "1Gi"
           startupProbe:
             httpGet:
-              path: /api/actuator/health
+              # Grupo readiness, nao o health agregado. O agregado soma
+              # indicadores que nao dizem nada sobre a aplicacao estar pronta
+              # para receber trafego - o de SMTP, por exemplo, responde DOWN
+              # quando o ambiente nao tem credencial de e-mail. Com o agregado
+              # aqui, o kubelet matava o pod a cada 150s mesmo com a aplicacao
+              # no ar (readiness e liveness UP), num CrashLoopBackOff eterno.
+              path: /api/actuator/health/readiness
               port: 8080
             failureThreshold: 30
             periodSeconds: 5
