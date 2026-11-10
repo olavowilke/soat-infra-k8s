@@ -13,33 +13,39 @@ REPO="$1"; shift
 OWNER="olavowilke"
 NOME="protecao-main"
 
-CHECKS_JSON="$(printf '%s\n' "$@" | jq -R '{context: .}' | jq -s .)"
+CHECKS_JSON=""
+for c in "$@"; do
+  CHECKS_JSON="${CHECKS_JSON:+${CHECKS_JSON},}{\"context\":\"${c}\"}"
+done
 
-BODY="$(jq -n --arg nome "$NOME" --argjson checks "$CHECKS_JSON" '{
-  name: $nome,
-  target: "branch",
-  enforcement: "active",
-  conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } },
-  bypass_actors: [],
-  rules: [
-    { type: "deletion" },
-    { type: "non_fast_forward" },
-    { type: "pull_request", parameters: {
-        required_approving_review_count: 0,
-        dismiss_stale_reviews_on_push: true,
-        required_reviewers: [],
-        require_code_owner_review: false,
-        require_last_push_approval: false,
-        required_review_thread_resolution: false,
-        allowed_merge_methods: ["merge", "squash", "rebase"]
+BODY="$(cat <<JSON
+{
+  "name": "${NOME}",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": { "ref_name": { "include": ["refs/heads/main"], "exclude": [] } },
+  "bypass_actors": [],
+  "rules": [
+    { "type": "deletion" },
+    { "type": "non_fast_forward" },
+    { "type": "pull_request", "parameters": {
+        "required_approving_review_count": 0,
+        "dismiss_stale_reviews_on_push": true,
+        "required_reviewers": [],
+        "require_code_owner_review": false,
+        "require_last_push_approval": false,
+        "required_review_thread_resolution": false,
+        "allowed_merge_methods": ["merge", "squash", "rebase"]
     } },
-    { type: "required_status_checks", parameters: {
-        strict_required_status_checks_policy: true,
-        do_not_enforce_on_create: false,
-        required_status_checks: $checks
+    { "type": "required_status_checks", "parameters": {
+        "strict_required_status_checks_policy": true,
+        "do_not_enforce_on_create": false,
+        "required_status_checks": [${CHECKS_JSON}]
     } }
   ]
-}')"
+}
+JSON
+)"
 
 ID="$(gh api "repos/${OWNER}/${REPO}/rulesets" --jq ".[] | select(.name==\"${NOME}\") | .id" | head -n1)"
 
