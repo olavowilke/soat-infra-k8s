@@ -121,7 +121,7 @@ passo operacional real de cada ambiente.
 
 - As condições 1 e 2 usam `appName = 'oficina-api'`, que é o nome reportado
   pelo agente Java do New Relic (`NEW_RELIC_APP_NAME`, ver Deployment em
-  `k8s/base/deployment.yaml`) — deve bater com o valor configurado no
+  `soat-oficina-api/k8s/base/deployment.yaml`) — deve bater com o valor configurado no
   agente (Tarefa 6, `oficina-api`).
 - A condição 3 depende da métrica de negócio `oficina.ordens.falhas`, emitida
   pela aplicação via Micrometer (Tarefa 6) — não confundir com

@@ -168,8 +168,7 @@ observabilidade do cluster.
 ## Pipelines (`.github/workflows/`)
 
 - **`ci.yml`** — `terraform fmt -check` + `terraform validate` (sem backend)
-  em todo push/PR. O job `Validar manifestos Kubernetes (kustomize)` não
-  renderiza mais nada e só passa. Ele existe porque é um check obrigatório.
+  em todo push/PR. O job de kustomize saiu: os manifestos vivem em `soat-oficina-api`.
 - **`cd.yml`** — em push para `main` (ou `workflow_dispatch`): autentica na
   AWS via OIDC e roda `terraform apply` (cluster, rede, NLB, ECR, New Relic).
   O Secret `oficina-secrets`, os manifestos e o rollout da imagem pertencem
@@ -223,7 +222,7 @@ observabilidade do cluster.
 ## `local-kind/` — setup da Fase 2
 
 Ambiente local em `kind`, usado só para desenvolvimento (não faz parte do
-deploy na AWS). Contém o `Postgres` e o `Mailhog` que o `k8s/base/` não tem
+deploy na AWS). Contém o `Postgres` e o `Mailhog` que os manifestos em `soat-oficina-api/k8s` não têm
 mais, porque na AWS eles são substituídos por RDS e um provedor SMTP real.
 Veja [`local-kind/k8s/README.md`](local-kind/k8s/README.md) e
 [`local-kind/terraform/README.md`](local-kind/terraform/README.md) para o
