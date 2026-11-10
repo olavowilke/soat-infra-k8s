@@ -131,3 +131,14 @@ passo operacional real de cada ambiente.
   `var.uptime_check_url`) — ver "O monitor sintético e o apply em duas
   fases" acima para o motivo de não dar para provisioná-lo já na primeira
   passada desta stack.
+
+## 5 e 6. Saga: DLQ com mensagens e saga em FALHOU
+
+Duas condições extras ficam na mesma policy, criadas em
+`newrelic.tf` como `dlq_com_mensagens` e `saga_falhou`. A primeira abre quando
+`max(oficina_fila_dlq_mensagens)` de qualquer fila (`FACET fila`) passa de `0`
+por `5` minutos. A segunda abre quando
+`sum(oficina_saga_finalizadas_total) WHERE resultado = 'FALHOU'` passa de `0`
+em uma janela de `5` minutos. Ambas são `critical` e `static`. As métricas
+vêm do `MetricasFilas` de cada serviço e do `MetricasSaga` da oficina-api. O
+dashboard `observability/dashboard-saga.json` mostra os mesmos dados.

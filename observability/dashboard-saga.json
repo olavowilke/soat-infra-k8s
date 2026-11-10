@@ -1,0 +1,272 @@
+{
+  "name": "Oficina - Saga",
+  "description": "Dashboard como codigo da saga de ordem de servico (Fase 4). Provisionado via Terraform (infra-k8s/terraform/newrelic.tf, recurso newrelic_one_dashboard_json), que le este arquivo com file() e substitui 'accountId': 0 pelo ID de conta real. As metricas Prometheus chegam pelo nri-prometheus com o nome original (underscores).",
+  "permissions": "PUBLIC_READ_WRITE",
+  "pages": [
+    {
+      "name": "Sagas por estado",
+      "description": "Sagas ativas agora, por estado (oficina_saga_ativas).",
+      "widgets": [
+        {
+          "title": "Sagas ativas por estado",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT latest(oficina_saga_ativas) FACET estado"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Sagas ativas ao longo do tempo",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT latest(oficina_saga_ativas) FACET estado TIMESERIES"
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Resultados por hora",
+      "description": "Sagas finalizadas por resultado (oficina_saga_finalizadas_total).",
+      "widgets": [
+        {
+          "title": "Sagas finalizadas por hora e resultado",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 8,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT rate(sum(oficina_saga_finalizadas_total), 1 hour) FACET resultado TIMESERIES"
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        },
+        {
+          "title": "Sagas finalizadas na janela",
+          "layout": {
+            "column": 9,
+            "row": 1,
+            "width": 4,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT sum(oficina_saga_finalizadas_total) FACET resultado"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "DLQ por fila",
+      "description": "Mensagens em cada DLQ (oficina_fila_dlq_mensagens). Fila acima de zero pede acao.",
+      "widgets": [
+        {
+          "title": "Mensagens por DLQ",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.billboard"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT latest(oficina_fila_dlq_mensagens) FACET fila"
+              }
+            ],
+            "thresholds": [
+              {
+                "alertSeverity": "CRITICAL",
+                "value": 1
+              }
+            ]
+          }
+        },
+        {
+          "title": "DLQ ao longo do tempo",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Metric SELECT latest(oficina_fila_dlq_mensagens) FACET fila TIMESERIES"
+              }
+            ],
+            "yAxisLeft": {
+              "zero": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Logs por sagaId",
+      "description": "Logs dos tres servicos que citam uma saga.",
+      "widgets": [
+        {
+          "title": "Logs com sagaId",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Log SELECT timestamp, service.name, level, sagaId, message WHERE sagaId IS NOT NULL LIMIT 100"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Logs por servico e nivel",
+          "layout": {
+            "column": 1,
+            "row": 6,
+            "width": 12,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Log SELECT count(*) WHERE sagaId IS NOT NULL FACET service.name, level"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "Traces distribuidos",
+      "description": "Traces que cruzam oficina-api, billing-service e execution-service.",
+      "widgets": [
+        {
+          "title": "Spans por servico",
+          "layout": {
+            "column": 1,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.bar"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Span SELECT count(*) WHERE appName IN ('oficina-api', 'billing-service', 'execution-service') FACET appName"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Duracao media dos spans por servico",
+          "layout": {
+            "column": 7,
+            "row": 1,
+            "width": 6,
+            "height": 3
+          },
+          "visualization": {
+            "id": "viz.line"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Span SELECT average(duration) WHERE appName IN ('oficina-api', 'billing-service', 'execution-service') FACET appName TIMESERIES"
+              }
+            ]
+          }
+        },
+        {
+          "title": "Traces recentes (servicos envolvidos)",
+          "layout": {
+            "column": 1,
+            "row": 4,
+            "width": 12,
+            "height": 5
+          },
+          "visualization": {
+            "id": "viz.table"
+          },
+          "rawConfiguration": {
+            "nrqlQueries": [
+              {
+                "accountId": 0,
+                "query": "FROM Span SELECT uniqueCount(appName) AS 'servicos', count(*) AS 'spans', max(duration) AS 'duracao maxima' WHERE appName IN ('oficina-api', 'billing-service', 'execution-service') FACET trace.id LIMIT 30"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}
