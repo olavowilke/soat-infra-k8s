@@ -68,45 +68,16 @@ O Security Group dos nós libera a faixa de NodePort para o VPC Link (`terraform
 Os alertas e o dashboard só existem com `NEW_RELIC_ACCOUNT_ID` e `NEW_RELIC_API_KEY` preenchidos.
 Os detalhes dos alertas estão em [`observability/alertas.md`](observability/alertas.md).
 
-## Diagrama da stack (Fase 3)
+## Diagrama da stack
 
-O desenho mostra só a `oficina-api`. O desenho completo da Fase 4 está no [README do OS Service](https://github.com/olavowilke/soat-oficina-api#fase-4--microsserviços-e-saga).
+O desenho mostra o que esta stack cria e o que cada serviço cria sobre ela.
+Caixas tracejadas vêm de outros repositórios.
+O desenho completo da Fase 4 (filas, bancos e Saga) está no [README do OS Service](https://github.com/olavowilke/soat-oficina-api#fase-4--microsserviços-e-saga).
 
-```mermaid
-flowchart TB
-    CLIENTE["Cliente (via lambda-auth: API Gateway + VPC Link)"]
+![Diagrama da stack infra-k8s: VPC, NLB, EKS, add-ons, ECR, SSM e New Relic](docs/diagramas/stack-infra-k8s.png)
 
-    subgraph VPC["VPC (infra-k8s)"]
-        subgraph PRIV["Sub-redes privadas"]
-            NLB["NLB interno\n(aws_lb.interno)"]
-            subgraph EKS["Cluster EKS"]
-                NS["Namespace oficina"]
-                SVC["Service oficina-api\nNodePort 30080"]
-                DEPL["Deployment oficina-api\n(2..N réplicas)"]
-                HPA["HorizontalPodAutoscaler\nCPU 60% / memória 75%"]
-                PDB["PodDisruptionBudget\nminAvailable: 1"]
-            end
-        end
-        SGDB["db-client-sg\n(\"crachá\" emprestado a EKS e lambda-auth)"]
-    end
-
-    ECR[("Amazon ECR\noficina_api")]
-    SSM["SSM Parameter Store\n(vpc-id, subnets, sg, vpc-link, cluster, ecr)"]
-    NR["New Relic\n(nri-bundle + dashboard + alertas)"]
-
-    CLIENTE --> NLB --> SVC --> DEPL
-    HPA -.escala.-> DEPL
-    PDB -.protege.-> DEPL
-    DEPL -->|"pull da imagem"| ECR
-    DEPL -- "veste" --> SGDB
-    DEPL -->|"métricas + logs"| NR
-
-    VPC --> SSM
-    ECR --> SSM
-    SSM -.consumido por.-> INFRADB["infra-database"]
-    SSM -.consumido por.-> LAMBDA["lambda-auth"]
-    SSM -.consumido por.-> APP["pipeline oficina-api"]
-```
+O fonte do PNG é [`docs/diagramas/stack-infra-k8s.html`](docs/diagramas/stack-infra-k8s.html).
+Para gerar o PNG de novo, rode o Chrome headless com o comando do comentário no topo do HTML.
 
 ## Estrutura
 
